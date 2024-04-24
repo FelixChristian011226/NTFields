@@ -70,7 +70,11 @@ class NN(torch.nn.Module):
         self.nl1=5      # 编码器中的线性层数量
         self.nl2=7      # 解码器中的线性层数量
 
-        # 编码器
+        '''
+        ==编码器==
+        encoder:  共nl1+1层。1层Linear(dim,h_size), nl1-1层Linear(h_size, h_size), 1层Linear(h_size, h_size)。
+        encoder1: 共nl1层。1层Linear(dim,h_size), nl1-1层Linear(h_size, h_size)。
+        '''
         self.encoder = torch.nn.ModuleList()                # 编码器的线性层。ModuleList是一个包含模块的列表，可以像列表一样进行迭代。
         self.encoder1 = torch.nn.ModuleList()
         
@@ -83,7 +87,11 @@ class NN(torch.nn.Module):
         
         self.encoder.append(Linear(h_size, h_size))         # 添加最后一层线性层
 
-        # 解码器
+        '''
+        ==解码器==
+        generator:  共nl2+2层。1层Linear(2*h_size + 2*fh_size, 2*h_size), nl2-1层Linear(2*h_size, 2*h_size), 1层Linear(2*h_size,h_size), 1层Linear(h_size,1)。
+        generator1: 共nl2层。1层Linear(2*h_size + 2*fh_size, 2*h_size), nl2-1层Linear(2*h_size, 2*h_size)。
+        '''
         self.generator = torch.nn.ModuleList()
         self.generator1 = torch.nn.ModuleList()
 
@@ -97,6 +105,11 @@ class NN(torch.nn.Module):
         self.generator.append(Linear(2*h_size,h_size))
         self.generator.append(Linear(h_size,1))
 
+        '''
+        ==环境特征提取器==
+        fc_env0: Linear(17*7, 128)。
+        fc_env1: Linear(128, 128)。
+        '''
         self.fc_env0 = Linear(feature_size, fh_size)
         self.fc_env1 = Linear(fh_size, fh_size)
     
@@ -280,43 +293,58 @@ class NN(torch.nn.Module):
 
     def out(self, coords, features0, features1):
         # 输出函数，计算最终的输出
-
+        # coords: (batch_size, 2*dim)
         coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
         size = coords.shape[0]
+        # 提取起点和终点坐标
         x0 = coords[:,:self.dim]
         x1 = coords[:,self.dim:]
-        
+        # 垂直方向拼接
+        # x: (2*batch_size, dim)
         x = torch.vstack((x0,x1))
         
+        # encoder[0]: Linear(dim,h_size=256)
         x  = self.act(self.encoder[0](x))
+        # encoder[1~nl1-1]: Linear(h_size, h_size)
+        # encoder1[1~nl1-1]: Linear(h_size, h_size)
         for ii in range(1,self.nl1):
             x_tmp = x
             x  = self.act(self.encoder[ii](x))
             x  = self.act(self.encoder1[ii](x) + x_tmp) 
         
+        # encoder[-1]: Linear(h_size, h_size)
         x = self.encoder[-1](x)
 
+        # 将特征切分为起点和终点特征
+        # x: (2*batch_size, h_size=256)
         x0 = x[:size,...]
         x1 = x[size:,...]
         
+        # (batch_size, h_size=256)
         x_0 = torch.max(x0,x1)
         x_1 = torch.min(x0,x1)
 
+        # (batch_size, fh_size=128)
         features_0 = torch.max(features0,features1)
         features_1 = torch.min(features0,features1)
 
+        # 将特征和坐标拼接，这里为什么可以拼接？
         x = torch.cat((x_0, x_1, features_0, features_1),1)
         
+        # generator[0]: Linear(2*h_size + 2*fh_size, 2*h_size)
         x = self.act(self.generator[0](x)) 
 
+        # generator[1~nl2-1]: Linear(2*h_size, 2*h_size)
         for ii in range(1, self.nl2):
             x_tmp = x
             x = self.act(self.generator[ii](x)) 
             x = self.act(self.generator1[ii](x) + x_tmp) 
         
+        # generator[-2]: Linear(2*h_size, h_size)
         y = self.generator[-2](x)
         x = self.act(y)
 
+        # generator[-1]: Linear(h_size, 1)
         y = self.generator[-1](x)
         x = torch.sigmoid(0.1*y) 
         
