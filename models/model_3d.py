@@ -27,56 +27,63 @@ class NN(torch.nn.Module):
         super(NN, self).__init__()
         self.dim = dim
 
-        h_size = 256 #512,256
-        fh_size = 128
+        h_size = 256 #512,256       # 定义隐藏层神经元数量，用于编码器和解码器
+        fh_size = 128               # 定义环境特征的隐藏层神经元数量
         
 
         #3D CNN encoder
+        # 输入1通道，输出16通道，卷积核大小3x3x3，填充1，填充模式为zeros，输出尺寸: 256 -> maxpooling -> 128
         self.conv_in = Conv3d(1, 16, 3, padding=1, padding_mode='zeros')  # out: 256 ->m.p. 128
+        # 输入16通道，输出32通道，卷积核大小3x3x3，填充1，填充模式为zeros，输出尺寸: 128
         self.conv_0 = Conv3d(16, 32, 3, padding=1, padding_mode='zeros')  # out: 128
         
-        self.actvn = torch.nn.ReLU()
+        self.actvn = torch.nn.ReLU()                    # 激活函数ReLU
 
-        self.maxpool = torch.nn.MaxPool3d(2)
+        self.maxpool = torch.nn.MaxPool3d(2)            # 3D最大池化层，核大小为2x2x2
 
-        self.conv_in_bn = torch.nn.BatchNorm3d(16)
+        self.conv_in_bn = torch.nn.BatchNorm3d(16)      # 对输入进行3D批量归一化，有助于加速网络训练过程。
         self.device = device
 
-        feature_size = (1 +  16 ) * 7 #+ 3
+        feature_size = (1 +  16 ) * 7 #+ 3              # 特征大小计算，（输入通道数+输出通道数）* 池化后尺寸
 
-        displacment = 0.0222#0.0222
-        displacments = []
+        displacment = 0.0222#0.0222                     # 位移量
+        displacments = []                               # 存储位移
         
-        displacments.append([0, 0, 0])
+        displacments.append([0, 0, 0])                  # 添加原始位置
         for x in range(3):
             for y in [-1, 1]:
                 input = [0, 0, 0]
-                input[x] = y * displacment
+                input[x] = y * displacment              # 在x方向上增加位移
                 displacments.append(input)
+
+        #displacments: [[0, 0, 0], [-0.0222, 0, 0], [0.0222, 0, 0], [0, -0.0222, 0], [0, 0.0222, 0], [0, 0, -0.0222], [0, 0, 0.0222]]
         
+        # 将位移转换为张量，并移到指定设备
         self.displacments = torch.Tensor(displacments).to(self.device)#cuda
 
         #decoder
 
-        self.scale = 10
+        self.scale = 10     #尺度参数，用于解码器。在解码器中，我们将特征缩放10倍，以便更好地训练网络。
 
-        self.act = torch.nn.ELU()
+        self.act = torch.nn.ELU()   # 激活函数ELU。ELU是一种非线性激活函数，它在负值区域有一个非零梯度，有助于加速网络训练过程。
 
-        self.nl1=5
-        self.nl2=7
+        self.nl1=5      # 编码器中的线性层数量
+        self.nl2=7      # 解码器中的线性层数量
 
-        self.encoder = torch.nn.ModuleList()
+        # 编码器
+        self.encoder = torch.nn.ModuleList()                # 编码器的线性层。ModuleList是一个包含模块的列表，可以像列表一样进行迭代。
         self.encoder1 = torch.nn.ModuleList()
         
-        self.encoder.append(Linear(dim,h_size))
+        self.encoder.append(Linear(dim,h_size))             # 添加第一个线性层
         self.encoder1.append(Linear(dim,h_size))
         
         for i in range(self.nl1-1):
-            self.encoder.append(Linear(h_size, h_size)) 
+            self.encoder.append(Linear(h_size, h_size))     # 添加隐藏层线性层
             self.encoder1.append(Linear(h_size, h_size)) 
         
-        self.encoder.append(Linear(h_size, h_size)) 
+        self.encoder.append(Linear(h_size, h_size))         # 添加最后一层线性层
 
+        # 解码器
         self.generator = torch.nn.ModuleList()
         self.generator1 = torch.nn.ModuleList()
 
@@ -95,64 +102,185 @@ class NN(torch.nn.Module):
     
     def init_weights(self, m):
         
-        if type(m) == torch.nn.Linear:
-            stdv = (1. / math.sqrt(m.weight.size(1))/1.)*2
+        if type(m) == torch.nn.Linear:  # 如果是线性层
+            stdv = (1. / math.sqrt(m.weight.size(1))/1.)*2  # 计算标准差。均匀分布初始化。防止模型陷入梯度消失或爆炸。
             #stdv = np.sqrt(6 / 64.) / self.T
             m.weight.data.uniform_(-stdv, stdv)
             m.bias.data.uniform_(-stdv, stdv)
 
+    '''
+    x: (1, 128, 128, 128)
+    '''
     def env_encoder(self, x):
-        x = x.unsqueeze(1)
-        f_0 = x
+        x = x.unsqueeze(1)  # 在第1维度上增加一个维度。将输入张量转换为适合3D卷积层的格式，因为通常情况下，3D卷积层的输入要求是四维张量，batch size×channels×height×width。
+        f_0 = x             # 输入特征，形状为(1, 1, 128, 128, 128)
 
-        net = self.actvn(self.conv_in(x))
-        net = self.conv_in_bn(net)
+        net = self.actvn(self.conv_in(x))   # 使用ReLU激活函数对卷积结果进行非线性变换
+        net = self.conv_in_bn(net)          # 对卷积结果进行3D批量归一化
         f_1 = net
-        return f_0, f_1
+        return f_0, f_1 # f_0:(1, 1, 128, 128, 128), f_1:(1, 16, 128, 128, 128)
     
     def env_features(self, coords, f_0, f_1):
+        # 计算环境特征
+        # 大概这个coords是一个形状为(batch_size, 6)的张量，其中每个样本的前三个值是起点坐标，后三个值是终点坐标
+        '''
+        coords = torch.tensor([[ 0.5277, -1.7155,  0.4340,  0.3320, -0.2521, -0.2794],
+                               [-0.3683, -0.4754, -0.0120, -1.0494,  0.4487,  0.4717],
+                               [-0.7196, -0.4240, -0.0673,  0.4960, -0.4940, -0.4898]])
+        '''
         
-        coords = coords.clone().detach().requires_grad_(False)
+        coords = coords.clone().detach().requires_grad_(False)  # 复制并且不追踪梯度
 
-        p0=coords[:,:3]
-        p1=coords[:,3:]
+        p0=coords[:,:3] # 张量中每个样本的从零数前三个值，提取起点坐标
+        '''
+        p0 = tensor([[ 0.5277, -1.7155,  0.4340],
+                     [-0.3683, -0.4754, -0.0120],
+                     [-0.7196, -0.4240, -0.0673]])
+        '''
+        p1=coords[:,3:] # 张量中每个样本的第三个之后的值，提取终点坐标
+        '''
+        p1 = tensor([[ 0.3320, -0.2521, -0.2794],
+                     [-1.0494,  0.4487,  0.4717],
+                     [ 0.4960, -0.4940, -0.4898]])
+        '''
 
-        size=p0.shape[0]
+        size=p0.shape[0]    # 获取批量大小
 
-        p = torch.vstack((p0,p1))
+        p = torch.vstack((p0,p1))   # 垂直方向拼接起点和终点坐标 p的形状为(2*batch_size, 3)
+        '''
+        p = tensor([[ 0.5277, -1.7155,  0.4340],
+                    [-0.3683, -0.4754, -0.0120],
+                    [-0.7196, -0.4240, -0.0673],
+                    [ 0.3320, -0.2521, -0.2794],
+                    [-1.0494,  0.4487,  0.4717],
+                    [ 0.4960, -0.4940, -0.4898]])
+        '''
         
-        p = torch.index_select(p, 1, torch.LongTensor([2,1,0]).to(self.device))
+        p = torch.index_select(p, 1, torch.LongTensor([2,1,0]).to(self.device)) # 重新排序坐标，将(x, y, z)调整为(z, y, x)
+        '''
+        p = tensor([[ 0.4340, -1.7155,  0.5277],
+                    [-0.0120, -0.4754, -0.3683],
+                    [-0.0673, -0.4240, -0.7196],
+                    [-0.2794, -0.2521,  0.3320],
+                    [ 0.4717,  0.4487, -1.0494],
+                    [-0.4898, -0.4940,  0.4960]])
+        '''
 
-
-        p=2*p
+        p=2*p   # 坐标缩放
+        '''
+        p = tensor([[ 0.8680, -3.4310,  1.0554],
+                    [-0.0240, -0.9508, -0.7366],
+                    [-0.1346, -1.3440, -1.4392],
+                    [-0.5588, -0.5042,  0.6640],
+                    [ 0.9434,  0.8974, -2.0988],
+                    [-0.9796, -0.9880,  0.9920]])
+        '''
         
-        p = p.unsqueeze(0)
-        p = p.unsqueeze(1).unsqueeze(1)
-        p = torch.cat([p + d for d in self.displacments], dim=2)
+        p = p.unsqueeze(0)  # 增加维度，p的形状为(1, 2*batch_size, 3)
+
+        p = p.unsqueeze(1).unsqueeze(1) # 增加维度，p的形状为(1, 1, 1, 2*batch_size, 3)
+        '''
+        p = tensor([[[[[ 0.8680, -3.4310,  1.0554],
+                       [-0.0240, -0.9508, -0.7366],
+                       [-0.1346, -1.3440, -1.4392],
+                       [-0.5588, -0.5042,  0.6640],
+                       [ 0.9434,  0.8974, -2.0988],
+                       [-0.9796, -0.9880,  0.9920]]]]])
+        '''
+
+        p = torch.cat([p + d for d in self.displacments], dim=2)    # 将位移应用到坐标，p的形状为(1, 1, 7, 2*batch_size, 3)
+        '''
+        displacments: [[0, 0, 0], [-0.0222, 0, 0], [0.0222, 0, 0], [0, -0.0222, 0], [0, 0.0222, 0], [0, 0, -0.0222], [0, 0, 0.0222]]
+        p = tensor([[[  [[ 0.8680, -3.4310,  1.0554],
+                         [-0.0240, -0.9508, -0.7366],
+                         [-0.1346, -1.3440, -1.4392],
+                         [-0.5588, -0.5042,  0.6640],
+                         [ 0.9434,  0.8974, -2.0988],
+                         [-0.9796, -0.9880,  0.9920]],
+                        [[ 0.8458, -3.4310,  1.0554],
+                         [-0.0462, -0.9508, -0.7366],
+                         [-0.1124, -1.3440, -1.4392],
+                         [-0.5810, -0.5042,  0.6640],
+                         [ 0.9656,  0.8974, -2.0988],
+                         [-0.9574, -0.9880,  0.9920]],
+                        [[ 0.8902, -3.4310,  1.0554],
+                         [-0.0018, -0.9508, -0.7366],
+                         [-0.1568, -1.3440, -1.4392],
+                         [-0.5364, -0.5042,  0.6640],
+                         [ 0.9212,  0.8974, -2.0988],
+                         [-1.0018, -0.9880,  0.9920]],
+                        [[ 0.8680, -3.4532,  1.0554],
+                         [-0.0240, -0.9730, -0.7366],
+                         [-0.1346, -1.3662, -1.4392],
+                         [-0.5588, -0.5264,  0.6640],
+                         [ 0.9434,  0.8752, -2.0988],
+                         [-0.9796, -1.0102,  0.9920]],
+                        [[ 0.8680, -3.4088,  1.0554],
+                         [-0.0240, -0.9298, -0.7366],
+                         [-0.1346, -1.2918, -1.4392],
+                         [-0.5588, -0.4818,  0.6640],
+                         [ 0.9434,  0.9418, -2.0988],
+                         [-0.9796, -0.9658,  0.9920]],
+                        [[ 0.8680, -3.4310,  1.0332],
+                         [-0.0240, -0.9508, -0.7588],
+                         [-0.1346, -1.3440, -1.4620],
+                         [-0.5588, -0.5042,  0.6418],
+                         [ 0.9434,  0.8974, -2.1210],
+                         [-0.9796, -0.9880,  1.0142]],
+                        [[ 0.8680, -3.4310,  1.0776],
+                         [-0.0240, -0.9508, -0.7144],
+                         [-0.1346, -1.3440, -1.4166],
+                         [-0.5588, -0.5042,  0.6872],
+                         [ 0.9434,  0.8974, -2.0754],
+                         [-0.9796, -0.9880,  0.9698]]  ]]])
+        
+        '''
 
         #print(p.shape)
+        # 使用双线性插值从输入特征图中提取特征
+        '''
+        grid_sample(input, grid, mode, padding_mode)
+        input: 形状为(N, C, Din, Hin, Win)的输入特征图
+        grid: 形状为(N, Dout, Hout, Wout, 3)的网格
+        mode: 插值模式，可选值为'nearest'和'bilinear'
+        padding_mode: 填充模式，可选值为'zeros'和'border'
+        return: 输出特征图，形状为(N, C, Dout, Hout, Wout)
+        '''
         feature_0 = F.grid_sample(f_0, p, mode='bilinear', padding_mode='border')
         feature_1 = F.grid_sample(f_1, p, mode='bilinear', padding_mode='border')
+        # feature_0的形状为(N=1, C=1, Dout=1, Hout=7, Wout=2*batch_size) 
+        # feature_1的形状为(N=1, C=16, Dout=1, Hout=7, Wout=2*batch_size)
         
-
-        features = torch.cat((feature_0, feature_1), dim=1)  
+        # 合并特征
+        features = torch.cat((feature_0, feature_1), dim=1)
+        # (1, 17, 1, 7, 2*batch_size)
         
+        # 重新调整特征形状
         shape = features.shape
         features = torch.reshape(features,
-                                 (shape[0], shape[1] * shape[3], shape[4]))  
-        #print(features.size())
-        features = torch.squeeze(features.transpose(1, -1))
+                                 (shape[0], shape[1] * shape[3], shape[4]))
+        # (1, 17*7, 2*batch_size)
 
+        #print(features.size())
+        # 去除不必要的维度
+        features = torch.squeeze(features.transpose(1, -1))      
+        # (2*batch_size, 17*7)               
+
+        # 对特征应用激活函数 
         features = self.act(self.fc_env0(features))
         features = self.act(self.fc_env1(features))
+        # (2*batch_size, 128), (2*batch_size, 128)
 
+        # 将特征切分为起点和终点特征
         features0=features[:size,:]
         features1=features[size:,:]
+        # (batch_size, 128), (batch_size, 128)
         
         return features0, features1
 
     def out(self, coords, features0, features1):
-        
+        # 输出函数，计算最终的输出
+
         coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
         size = coords.shape[0]
         x0 = coords[:,:self.dim]
