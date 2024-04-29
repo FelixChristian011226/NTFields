@@ -328,13 +328,15 @@ class NN(torch.nn.Module):
         features_0 = torch.max(features0,features1)
         features_1 = torch.min(features0,features1)
 
-        # 将特征和坐标拼接，这里为什么可以拼接？
+        # 将特征和坐标拼接。
         x = torch.cat((x_0, x_1, features_0, features_1),1)
+        # x: (2*batch_size, 2*h_size + 2*fh_size)
         
         # generator[0]: Linear(2*h_size + 2*fh_size, 2*h_size)
         x = self.act(self.generator[0](x)) 
 
         # generator[1~nl2-1]: Linear(2*h_size, 2*h_size)
+        # generator1[1~nl2-1]: Linear(2*h_size, 2*h_size)
         for ii in range(1, self.nl2):
             x_tmp = x
             x = self.act(self.generator[ii](x)) 
@@ -349,6 +351,8 @@ class NN(torch.nn.Module):
         x = torch.sigmoid(0.1*y) 
         
         return x, coords
+        # x: (2*batch_size, 1)
+        # coords: (batch_size, 2*dim)
 
     def forward(self, coords, grid):
         coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
@@ -386,8 +390,26 @@ class Model():
     
     def gradient(self, y, x, create_graph=True):                                                               
                                                                                   
-        grad_y = torch.ones_like(y)                                                                 
+        grad_y = torch.ones_like(y) # 创建一个与y大小相同的全为1的张量grad_y，用于指定梯度的起始值
 
+        '''
+        autograd.grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=False, only_inputs=True, allow_unused=False)
+        outputs: 求导的因变量（需要求导的函数）
+        inputs: 求导的自变量
+        grad_outputs: 如果 outputs为标量,则grad_outputs=None;如果outputs是向量,则此参数必须写
+        设output为y=f(x)=(y1,y2,...,ym)∈R^m,input为x=(x1,x2,...,xn)∈R^n,grad_outputs为g=(g1,g2,...,gm)∈R^m(都是向量)
+        运算过程如下：
+        Jacobi矩阵J=[∂y1/∂x1,∂y1/∂x2,...,∂y1/∂xn;
+                    ∂y2/∂x1,∂y2/∂x2,...,∂y2/∂xn;
+                    ... ... ... ... ... ... ...
+                    ∂ym/∂x1,∂ym/∂x2,...,∂ym/∂xn]
+        g=[g1,g2,...,gm]
+        则output=J*g=[g1*∂y1/∂x1+g2*∂y2/∂x1+...+gm*∂ym/∂x1,
+                     g1*∂y1/∂x2+g2*∂y2/∂x2+...+gm*∂ym/∂x2,
+                     ... ... ... ... ... ... ...
+                     g1*∂y1/∂xn+g2*∂y2/∂xn+...+gm*∂ym/∂xn]
+        
+        '''
         grad_x = torch.autograd.grad(y, x, grad_y, only_inputs=True, retain_graph=True, create_graph=create_graph)[0]
         
         return grad_x  
