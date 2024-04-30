@@ -479,22 +479,19 @@ class Model():
 
     def train(self):
 
-       
-
         self.network = NN(self.Params['Device'],self.dim)
         self.network.apply(self.network.init_weights)
         #self.network.float()
+        # 将模型移动到指定的设备上进行计算。
         self.network.to(self.Params['Device'])
 
-        
-
+        # 使用AdamW优化器
         self.optimizer = torch.optim.AdamW(
             self.network.parameters(), lr=self.Params['Training']['Learning Rate']
             ,weight_decay=0.1)
         
         self.dataset = db.Database(self.Params['DataPath'])
-        
-        
+                
         dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=int(self.Params['Training']['Batch Size']),
@@ -505,9 +502,11 @@ class Model():
         weights = Tensor(torch.ones(len(self.dataset))).to(
             torch.device(self.Params['Device']))
         
+        # 计算数据集中每个样本的权重，用于加权采样。
         dists=torch.norm(self.dataset.data[:,0:3]-self.dataset.data[:,3:6],dim=1)
         weights = dists.max()-dists
 
+        # 对计算出的权重进行截断，确保权重在一定范围内。
         weights = torch.clamp(
                 weights/weights.max(), self.Params['Training']['Resampling Bounds'][0], self.Params['Training']['Resampling Bounds'][1])
         
@@ -520,8 +519,10 @@ class Model():
             sampler=train_sampler_wei
         )
 
+        # 速度
         speed = self.dataset.data[:,2*self.dim:]
 
+        # 网格
         grid = self.dataset.grid
         grid = grid.to(self.Params['Device'])
         grid = grid.unsqueeze(0)
@@ -536,6 +537,7 @@ class Model():
         #step = 1.0
         tt =time.time()
 
+        # 使用pickle深拷贝当前模型和优化器的状态。
         current_state = pickle.loads(pickle.dumps(self.network.state_dict()))
         current_optimizer = pickle.loads(pickle.dumps(self.optimizer.state_dict()))
         #p=(torch.rand((5,6))-0.5).cuda()
@@ -551,19 +553,21 @@ class Model():
 
             total_diff=0
 
-            
             self.lamb = min(1.0,max(0,(epoch-self.l0)/self.l1))
             
+            # 将当前模型状态和优化器状态加入到队列中
             prev_state_queue.append(current_state)
             prev_optimizer_queue.append(current_optimizer)
+            # 最多记录5个
             if(len(prev_state_queue)>5):
                 prev_state_queue.pop(0)
                 prev_optimizer_queue.pop(0)
             
+            # 将当前模型状态和优化器状态加入到历史状态队列中
             current_state = pickle.loads(pickle.dumps(self.network.state_dict()))
             current_optimizer = pickle.loads(pickle.dumps(self.optimizer.state_dict()))
             
-        
+            # 更新学习率
             self.optimizer.param_groups[0]['lr']  = max(5e-4*(1-epoch/self.l0),1e-5)
             
             prev_diff = current_diff
@@ -582,38 +586,40 @@ class Model():
                     feature0=torch.zeros((points.shape[0],128)).to(self.Params['Device'])
                     feature1=torch.zeros((points.shape[0],128)).to(self.Params['Device'])
                     
+                    # 如果 lamb 大于0，则计算环境特征，并对其进行加权
                     if self.lamb > 0:
                         f_0, f_1 = self.network.env_encoder(grid)
                         feature0, feature1 = self.network.env_features(points, f_0, f_1)
                         feature0 = feature0*self.lamb
                         feature1 = feature1*self.lamb
 
+                    # 计算损失，并进行反向传播
                     loss_value, loss_n, wv = self.Loss(points, feature0, feature1, speed)
-  
                     loss_value.backward()
 
-                    # Update parameters
+                    # 更新参数并清零梯度
                     self.optimizer.step()
                     self.optimizer.zero_grad()
                     
-                    
+                    # 累加训练损失和损失差异
                     total_train_loss += loss_value.clone().detach()
                     total_diff += loss_n.clone().detach()
                     
                     
                     del points, speed, loss_value, loss_n, wv#,indexbatch
                 
-               
+                # 计算平均训练损失和平均损失差异
                 total_train_loss /= len(dataloader)#dataloader train_loader
                 total_diff /= len(dataloader)#dataloader train_loader
 
+                # 更新当前损失和损失比例
                 current_diff = total_diff
                 diff_ratio = current_diff/prev_diff
             
+                # 如果损失比例不在指定范围内，则进行模型参数的回滚
                 if (diff_ratio < 1.2 and diff_ratio > 0):#1.5
                     break
                 else:
-                    
                     iter+=1
                     with torch.no_grad():
                         random_number = random.randint(0, min(4,epoch-1))
@@ -623,15 +629,16 @@ class Model():
                     print("RepeatEpoch = {} -- Loss = {:.4e}".format(
                         epoch, total_diff))
                 
-                
+            # 将训练损失记录到列表中
             self.total_train_loss.append(total_train_loss)
   
-            
+            # 打印每个epoch的训练损失
             if epoch % self.Params['Training']['Print Every * Epoch'] == 0:
                 with torch.no_grad():
                     print("Epoch = {} -- Loss = {:.4e}".format(
                         epoch, total_diff.item()))
 
+            # 保存模型
             if (epoch % self.Params['Training']['Save Every * Epoch'] == 0) or (epoch == self.Params['Training']['Number of Epochs']) or (epoch == 1):
                 self.plot(epoch,total_diff.item(),grid)
                 with torch.no_grad():
