@@ -435,25 +435,25 @@ class Model():
         T0 = torch.einsum('ij,ij->i', D, D)
         # (batch_size)
 
-        DT0=dtau[:,:self.dim]   #终点导数
-        DT1=dtau[:,self.dim:]   #起点导数
+        DT0=dtau[:,:self.dim]   #起点qs导数
+        DT1=dtau[:,self.dim:]   #终点qg导数
         # (batch_size, dim)
 
         # T01=∇τ^2(τ在起点qs求导)
-        # T02=-2τ∇τ·D(τ在起点qs求导)=-2∇τ(qg-qs)=2∇τ(qs-qg)
+        # T02=-2τ∇τ·D(τ在起点qs求导)=-2∇τ(qg-qs)
         T01    = T0*torch.einsum('ij,ij->i', DT0, DT0)
         T02    = -2*tau[:,0]*torch.einsum('ij,ij->i', DT0, D)
 
         # T11=∇τ^2(τ在终点qg求导)
-        # T12=2τ∇τ·D(τ在终点qg求导)=2∇τ(qg-qs)=-2∇τ(qs-qg)
+        # T12=2τ∇τ·D(τ在终点qg求导)=2∇τ(qg-qs)
         T11    = T0*torch.einsum('ij,ij->i', DT1, DT1)
         T12    = 2*tau[:,0]*torch.einsum('ij,ij->i', DT1, D)
         
         # T3=τ^2
         T3    = tau[:,0]**2 
         
-        # S0=∇τ^2-2τ∇τ(qs-qg)+τ^2(τ在起点qs求导)
-        # S1=∇τ^2+2τ∇τ(qs-qg)+τ^2(τ在终点qg求导)
+        # S0=∇τ^2+2τ∇τ(qg-qs)+τ^2(τ在起点qs求导)
+        # S1=∇τ^2-2τ∇τ(qg-qs)+τ^2(τ在终点qg求导)
         S0 = (T01-T02+T3)
         S1 = (T11-T12+T3)
 
@@ -670,13 +670,16 @@ class Model():
     def load_pretrained_state_dict(self, state_dict):
         own_state=self.state_dict
 
-
+    '''
+    计算时间
+    T(qs,qg)=||qs-qg||/τ(qs,qg)
+    '''
     def TravelTimes(self, Xp, feature0, feature1):
         Xp = Xp.to(torch.device(self.Params['Device']))
         
         tau, coords = self.network.out(Xp, feature0, feature1)
-       
-        D = Xp[:,self.dim:]-Xp[:,:self.dim]
+        
+        D = Xp[:,self.dim:]-Xp[:,:self.dim] #qg-qs
         
         T0 = torch.einsum('ij,ij->i', D, D)
 
@@ -685,6 +688,9 @@ class Model():
         del Xp, tau, T0
         return TT
     
+    '''
+    计算τ
+    '''
     def Tau(self, Xp, feature0, feature1):
         Xp = Xp.to(torch.device(self.Params['Device']))
      
@@ -692,23 +698,26 @@ class Model():
         
         return tau
 
+    '''
+    计算速度
+    '''
     def Speed(self, Xp, feature0, feature1):
         Xp = Xp.to(torch.device(self.Params['Device']))
 
         tau, Xp = self.network.out(Xp, feature0, feature1)
         dtau = self.gradient(tau, Xp)        
         
-        D = Xp[:,self.dim:]-Xp[:,:self.dim]
-        T0 = torch.einsum('ij,ij->i', D, D)
+        D = Xp[:,self.dim:]-Xp[:,:self.dim] #qg-qs
+        T0 = torch.einsum('ij,ij->i', D, D) #||qg-qs||^2
 
-        DT1 = dtau[:,self.dim:]
+        DT1 = dtau[:,self.dim:] #终点导数
 
-        T1    = T0*torch.einsum('ij,ij->i', DT1, DT1)
-        T2    = 2*tau[:,0]*torch.einsum('ij,ij->i', DT1, D)
+        T1    = T0*torch.einsum('ij,ij->i', DT1, DT1)   #∇τ^2(τ在终点qg求导)
+        T2    = 2*tau[:,0]*torch.einsum('ij,ij->i', DT1, D) #2τ∇τ·D(τ在终点qg求导)=2∇τ(qg-qs)=-2∇τ(qs-qg)
 
         T3    = tau[:,0]**2
         
-        S = (T1-T2+T3)
+        S = (T1-T2+T3)  #∇τ^2-2τ∇τ(qs-qg)+τ^2(τ在终点qg求导)
 
         Ypred = T3 / torch.sqrt(S)
         
