@@ -300,8 +300,8 @@ class NN(torch.nn.Module):
         x0 = coords[:,:self.dim]
         x1 = coords[:,self.dim:]
         # 垂直方向拼接
-        # x: (2*batch_size, dim)
         x = torch.vstack((x0,x1))
+        # x: (2*batch_size, dim)
         
         # encoder[0]: Linear(dim,h_size=256)
         x  = self.act(self.encoder[0](x))
@@ -314,23 +314,25 @@ class NN(torch.nn.Module):
         
         # encoder[-1]: Linear(h_size, h_size)
         x = self.encoder[-1](x)
+        # x: (2*batch_size, h_size=256)
 
         # 将特征切分为起点和终点特征
-        # x: (2*batch_size, h_size=256)
         x0 = x[:size,...]
         x1 = x[size:,...]
-        
         # (batch_size, h_size=256)
+        
         x_0 = torch.max(x0,x1)
         x_1 = torch.min(x0,x1)
+        # (batch_size, h_size=256)
 
-        # (batch_size, fh_size=128)
+
         features_0 = torch.max(features0,features1)
         features_1 = torch.min(features0,features1)
+        # (batch_size, fh_size=128)
 
         # 将特征和坐标拼接。
         x = torch.cat((x_0, x_1, features_0, features_1),1)
-        # x: (2*batch_size, 2*h_size + 2*fh_size)
+        # x: (batch_size, 2*h_size + 2*fh_size)
         
         # generator[0]: Linear(2*h_size + 2*fh_size, 2*h_size)
         x = self.act(self.generator[0](x)) 
@@ -344,14 +346,14 @@ class NN(torch.nn.Module):
         
         # generator[-2]: Linear(2*h_size, h_size)
         y = self.generator[-2](x)
-        x = self.act(y)
+        x = self.act(y)     # ELU
 
         # generator[-1]: Linear(h_size, 1)
         y = self.generator[-1](x)
         x = torch.sigmoid(0.1*y) 
         
         return x, coords
-        # x: (2*batch_size, 1)
+        # x: (batch_size, 1)
         # coords: (batch_size, 2*dim)
 
     def forward(self, coords, grid):
@@ -379,7 +381,7 @@ class Model():
 
         self.Params['Training'] = {}
         self.Params['Training']['Batch Size'] = 10000
-        self.Params['Training']['Number of Epochs'] = 20000
+        self.Params['Training']['Number of Epochs'] = 1
         self.Params['Training']['Resampling Bounds'] = [0.2, 0.95]
         self.Params['Training']['Print Every * Epoch'] = 1
         self.Params['Training']['Save Every * Epoch'] = 10
@@ -411,50 +413,66 @@ class Model():
         
         '''
         grad_x = torch.autograd.grad(y, x, grad_y, only_inputs=True, retain_graph=True, create_graph=create_graph)[0]
+        # y: (batch_size, 1)
+        # x: (batch_size, 2*dim)
+        # grad_x: (batch_size, 2*dim)
         
         return grad_x  
 
     def Loss(self, points, features0, features1, Yobs):
         
-      
         start=time.time()
+        # out的输出为x:(batch_size, 1), coords:(batch_size, 2*dim)
         tau, Xp = self.network.out(points, features0, features1)
         dtau = self.gradient(tau, Xp)
         end=time.time()
         
-        D = Xp[:,self.dim:]-Xp[:,:self.dim]
+        # 距离
+        D = Xp[:,self.dim:]-Xp[:,:self.dim] #qg-qs
+        # (batch_size, dim)
         
+        # 矩阵点积，这里是计算平方，即距离的平方
         T0 = torch.einsum('ij,ij->i', D, D)
-        
-        
-        DT0=dtau[:,:self.dim]
-        DT1=dtau[:,self.dim:]
+        # (batch_size)
 
+        DT0=dtau[:,:self.dim]   #终点导数
+        DT1=dtau[:,self.dim:]   #起点导数
+        # (batch_size, dim)
+
+        # T01=∇τ^2(τ在起点qs求导)
+        # T02=-2τ∇τ·D(τ在起点qs求导)=-2∇τ(qg-qs)=2∇τ(qs-qg)
         T01    = T0*torch.einsum('ij,ij->i', DT0, DT0)
         T02    = -2*tau[:,0]*torch.einsum('ij,ij->i', DT0, D)
 
+        # T11=∇τ^2(τ在终点qg求导)
+        # T12=2τ∇τ·D(τ在终点qg求导)=2∇τ(qg-qs)=-2∇τ(qs-qg)
         T11    = T0*torch.einsum('ij,ij->i', DT1, DT1)
         T12    = 2*tau[:,0]*torch.einsum('ij,ij->i', DT1, D)
         
-    
-        T3    = tau[:,0]**2
+        # T3=τ^2
+        T3    = tau[:,0]**2 
         
+        # S0=∇τ^2-2τ∇τ(qs-qg)+τ^2(τ在起点qs求导)
+        # S1=∇τ^2+2τ∇τ(qs-qg)+τ^2(τ在终点qg求导)
         S0 = (T01-T02+T3)
         S1 = (T11-T12+T3)
-       
+
+        # 预测速度
         sq_Ypred0 = 1/torch.sqrt(torch.sqrt(S0)/T3)
         sq_Ypred1 = 1/torch.sqrt(torch.sqrt(S1)/T3)
 
-
+        # 真实速度
         sq_Yobs0=torch.sqrt(Yobs[:,0])
         sq_Yobs1=torch.sqrt(Yobs[:,1])
 
-        
+        # 计算损失
         diff = abs(1-sq_Ypred0/sq_Yobs0)+abs(1-sq_Ypred1/sq_Yobs1)+\
             abs(1-sq_Yobs0/sq_Ypred0)+abs(1-sq_Yobs1/sq_Ypred1)
 
+        # 计算均值
         loss_n = torch.sum(diff)/Yobs.shape[0]
 
+        # 为什么返回两个一样的..
         loss = loss_n
 
         return loss, loss_n, diff
