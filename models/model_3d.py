@@ -713,55 +713,84 @@ class Model():
         DT1 = dtau[:,self.dim:] #终点导数
 
         T1    = T0*torch.einsum('ij,ij->i', DT1, DT1)   #∇τ^2(τ在终点qg求导)
-        T2    = 2*tau[:,0]*torch.einsum('ij,ij->i', DT1, D) #2τ∇τ·D(τ在终点qg求导)=2∇τ(qg-qs)=-2∇τ(qs-qg)
+        T2    = 2*tau[:,0]*torch.einsum('ij,ij->i', DT1, D) #2τ∇τ·D(τ在终点qg求导)=2∇τ(qg-qs)
 
-        T3    = tau[:,0]**2
+        T3    = tau[:,0]**2 #τ^2
         
-        S = (T1-T2+T3)  #∇τ^2-2τ∇τ(qs-qg)+τ^2(τ在终点qg求导)
+        S = (T1-T2+T3)  #∇τ^2-2τ∇τ(qg-qs)+τ^2(τ在终点qg求导)
 
-        Ypred = T3 / torch.sqrt(S)
+        Ypred = T3 / torch.sqrt(S) #S(qg)
         
         del Xp, tau, dtau, T0, T1, T2, T3
         return Ypred
     
     def Gradient(self, Xp, f_0, f_1):
+        # Xp: (1, 2*dim), f_0,f_1:(1, 1, 128, 128, 128)
         Xp = Xp.to(torch.device(self.Params['Device']))
-       
         #Xp.requires_grad_()
         feature0, feature1 = self.network.env_features(Xp, f_0, f_1)
+        # (batch_size, 128)，起点终点特征
         
         tau, Xp = self.network.out(Xp, feature0, feature1)
         dtau = self.gradient(tau, Xp)
+        print("dtau shape:",dtau.shape)
         
+        D = Xp[:,self.dim:]-Xp[:,:self.dim] #qg-qs
+        T0 = torch.sqrt(torch.einsum('ij,ij->i', D, D)) #||qg-qs||
+        T3 = tau[:, 0]**2   #τ^2
+
+        V0 = D  #qg-qs
+        V1 = dtau[:,self.dim:]  #终点qg导数∇τ
         
-        D = Xp[:,self.dim:]-Xp[:,:self.dim]
-        T0 = torch.sqrt(torch.einsum('ij,ij->i', D, D))
-        T3 = tau[:, 0]**2
+        Y1 = 1/(T0*tau[:, 0])*V0    #(qg-qs)/(||qg-qs||*τ)
+        Y2 = T0/T3*V1               #||qg-qs||*∇τ/τ^2
 
-        V0 = D
-        V1 = dtau[:,self.dim:]
-        
-        Y1 = 1/(T0*tau[:, 0])*V0
-        Y2 = T0/T3*V1
+        '''
+        T(qs,qg)=||qs-qg||/τ(qs,qg)
+        对T在qg处求导
+        ∇T(qs,qg)=∇||qs-qg||/τ(qs,qg)-||qs-qg||∇τ(qs,qg)/τ^2(qs,qg)
+                 =-(qs-qg)/(||qs-qg||*τ(qs,qg))-||qs-qg||∇τ(qs,qg)/τ^2(qs,qg)
+                 =Y1-Y2
+        '''
 
-
+        # 为什么取负？
         Ypred1 = -(Y1-Y2)
-        Spred1 = torch.norm(Ypred1)
+        # (1, dim)
+        Spred1 = torch.norm(Ypred1) #||Ypred1||
         Ypred1 = 1/Spred1**2*Ypred1
+        '''
+        按qg处求导
+        上面Ypred1就是∇T(qs,qg),Spred1就是||∇T(qs,qg)||
+        由于||∇T(qs,qg)||=1/S(qg),同时乘以S^2(qg)即可得到：
+        ||S^2(qg)∇T(qs,qg)||=S(qg)
+        Ypred1 = 1/Spred1**2*Ypred1
+               = ∇T(qs,qg)/||∇T(qs,qg)||^2
+               = S(qg)
+        '''
 
-        V0=-D
-        V1=dtau[:,:self.dim]
+        V0=-D   #qs-qg
+        V1=dtau[:,:self.dim]    #起点qs导数∇τ
         
-        Y1 = 1/(T0*tau[:, 0])*V0
-        Y2 = T0/T3*V1
+        Y1 = 1/(T0*tau[:, 0])*V0    #(qs-qg)/(||qs-qg||*τ)
+        Y2 = T0/T3*V1               #||qs-qg||*∇τ/τ^2
 
+        '''
+        T(qs,qg)=||qs-qg||/τ(qs,qg)
+        对T在qs处求导
+        ∇T(qs,qg)=∇||qs-qg||/τ(qs,qg)-||qs-qg||∇τ(qs,qg)/τ^2(qs,qg)
+                 =(qs-qg)/(||qs-qg||*τ(qs,qg))-||qs-qg||∇τ(qs,qg)/τ^2(qs,qg)
+                 =Y1-Y2
+        '''
+
+        # 为什么取负？×2
         Ypred0 = -(Y1-Y2)
-        Spred0 = torch.norm(Ypred0)
+        Spred0 = torch.norm(Ypred0) #||Ypred0||
 
-        Ypred0 = 1/Spred0**2*Ypred0
+        Ypred0 = 1/Spred0**2*Ypred0 #同理
         
         return torch.cat((Ypred0, Ypred1),dim=1)
      
+    # 
     def plot(self,epoch,total_train_loss, grid):
         limit = 0.5
         xmin     = [-limit,-limit]
