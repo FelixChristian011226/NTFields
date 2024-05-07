@@ -381,7 +381,7 @@ class Model():
 
         self.Params['Training'] = {}
         self.Params['Training']['Batch Size'] = 10000
-        self.Params['Training']['Number of Epochs'] = 1
+        self.Params['Training']['Number of Epochs'] = 1 #20000
         self.Params['Training']['Resampling Bounds'] = [0.2, 0.95]
         self.Params['Training']['Print Every * Epoch'] = 1
         self.Params['Training']['Save Every * Epoch'] = 10
@@ -790,28 +790,51 @@ class Model():
         
         return torch.cat((Ypred0, Ypred1),dim=1)
      
-    # 
     def plot(self,epoch,total_train_loss, grid):
         limit = 0.5
         xmin     = [-limit,-limit]
         xmax     = [limit,limit]
         spacing=limit/40.0
+        '''
+        X,Y: (80,80)
+        [[-0.5    -0.4875 -0.475  ...  0.4625  0.475   0.4875]
+         [-0.5    -0.4875 -0.475  ...  0.4625  0.475   0.4875]
+         [-0.5    -0.4875 -0.475  ...  0.4625  0.475   0.4875]
+         ...
+         [-0.5    -0.4875 -0.475  ...  0.4625  0.475   0.4875]
+         [-0.5    -0.4875 -0.475  ...  0.4625  0.475   0.4875]
+         [-0.5    -0.4875 -0.475  ...  0.4625  0.475   0.4875]]
+        '''
         X,Y      = np.meshgrid(np.arange(xmin[0],xmax[0],spacing),np.arange(xmin[1],xmax[1],spacing))
+
 
         Xsrc = [0]*self.dim
         
+        # Xsrc: [0,0]
         Xsrc[0] = self.pos[0]
         Xsrc[1] = self.pos[1]
 
+        # XP: (6400, dim*2) 
         XP       = np.zeros((len(X.flatten()),2*self.dim))
         XP[:,:self.dim] = Xsrc
         XP[:,self.dim+0]  = X.flatten()
         XP[:,self.dim+1]  = Y.flatten()
         XP = Variable(Tensor(XP)).to(self.Params['Device'])
+        '''
+        XP: (6400, 2*dim) 
+        [[ pos[0].      pos[1].     -0.5    -0.5   ]
+         [ pos[0].      pos[1].     -0.4875 -0.5   ]
+         [ pos[0].      pos[1].     -0.475  -0.5   ]
+         ...
+         [ pos[0].      pos[1].      0.4625  0.4875]
+         [ pos[0].      pos[1].      0.475   0.4875]
+         [ pos[0].      pos[1].      0.4875  0.4875]]
+        '''
 
         feature0=torch.zeros((XP.shape[0],128)).to(self.Params['Device'])
         feature1=torch.zeros((XP.shape[0],128)).to(self.Params['Device'])
-        
+        # (6400, 128)
+
         if self.lamb > 0:
             f_0, f_1 = self.network.env_encoder(grid)
             feature0, feature1 = self.network.env_features(XP, f_0, f_1)
@@ -826,20 +849,21 @@ class Model():
         TT = tt.to('cpu').data.numpy().reshape(X.shape)
         V  = ss.to('cpu').data.numpy().reshape(X.shape)
         TAU = tau.to('cpu').data.numpy().reshape(X.shape)
+        # (80,80)
 
         fig = plt.figure()
 
         ax = fig.add_subplot(111)
-        quad1 = ax.pcolormesh(X,Y,V,vmin=0,vmax=1)
-        ax.contour(X,Y,TT,np.arange(0,3,0.05), cmap='bone', linewidths=0.5)#0.25
+        quad1 = ax.pcolormesh(X,Y,V,vmin=0,vmax=1)                                  # 绘制速度
+        ax.contour(X,Y,TT,np.arange(0,3,0.05), cmap='bone', linewidths=0.5)#0.25    # 绘制等高线
         plt.colorbar(quad1,ax=ax, pad=0.1, label='Predicted Velocity')
         plt.savefig(self.Params['ModelPath']+"/plots"+str(epoch)+"_"+str(round(total_train_loss,4))+"_0.jpg",bbox_inches='tight')
 
         plt.close(fig)
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        quad1 = ax.pcolormesh(X,Y,TAU,vmin=0,vmax=1)
-        ax.contour(X,Y,TT,np.arange(0,3,0.05), cmap='bone', linewidths=0.5)#0.25
+        quad1 = ax.pcolormesh(X,Y,TAU,vmin=0,vmax=1)                                # 绘制τ
+        ax.contour(X,Y,TT,np.arange(0,3,0.05), cmap='bone', linewidths=0.5)#0.25    # 绘制等高线
         plt.colorbar(quad1,ax=ax, pad=0.1, label='Predicted Velocity')
         plt.savefig(self.Params['ModelPath']+"/tauplots"+str(epoch)+"_"+str(round(total_train_loss,4))+"_0.jpg",bbox_inches='tight')
 
