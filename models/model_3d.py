@@ -733,7 +733,7 @@ class Model():
         
         tau, Xp = self.network.out(Xp, feature0, feature1)
         dtau = self.gradient(tau, Xp)
-        print("dtau shape:",dtau.shape)
+        # (1, 2*dim)
         
         D = Xp[:,self.dim:]-Xp[:,:self.dim] #qg-qs
         T0 = torch.sqrt(torch.einsum('ij,ij->i', D, D)) #||qg-qs||

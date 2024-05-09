@@ -63,7 +63,6 @@ for i in range(5):
     point1=[]
     point0.append(XP[:,0:3])
     point1.append(XP[:,3:6])
-    print("XP.shape",XP.shape)
     #print(id)
 
     # 迭代进行梯度下降路径规划，直到距离小于阈值或迭代次数超过500次
