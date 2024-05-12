@@ -73,9 +73,11 @@ safe_dis = 0.06
 
 # 初始化，存入起点终点，not_done数组记录机器人是否已经规划完毕，point[]记录路径点
 XP = torch.zeros((robot_num, 6))  # 初始化一个形状为 (robot_num, 6) 的零张量
+prev_XP = torch.zeros((robot_num, 6))
 for i in range(robot_num):
     XP[i] = torch.tensor(start_goals[i])  # 将 start_goals 中的每个元素赋值给 XP 的每行
     XP[i] = XP[i]/20.0  # 对坐标进行归一化
+    prev_XP[i] = XP[i].clone()
 not_done = [True] * robot_num
 point = [[] for _ in range(robot_num)]
 
@@ -84,7 +86,7 @@ start = timer()
 iter = 0
 while any(not_done):
     print("iter",iter)
-
+    prev_XP = XP.clone()
     # 遍历每个机器人，获得速度
     for i in range(robot_num):
         if(not_done[i]==False):
@@ -119,6 +121,13 @@ while any(not_done):
 
             XP1 = XP[i].view(1, 6).to('cuda')
             XP2 = XP[j].view(1, 6).to('cuda')
+            prev_XP1 = prev_XP[i].view(1, 6).to('cuda')
+            prev_XP2 = prev_XP[j].view(1, 6).to('cuda')
+            # 计算原速度
+            prev_v1 = torch.norm(XP1[:, 0:3]-prev_XP1[:, 0:3])
+            prev_v2 = torch.norm(XP2[:, 0:3]-prev_XP2[:, 0:3])
+            print("prev_v1", prev_v1)
+            print("prev_v2", prev_v2)
 
             rbt_dis = torch.norm(XP1[:, 0:3] - XP2[:, 0:3])
             if rbt_dis < safe_dis:
@@ -132,12 +141,19 @@ while any(not_done):
                 XP1[:, 0:3] += adjust
                 XP2[:, 0:3] -= adjust
 
+                # 计算现速度
+                v1 = torch.norm(XP1[:, 0:3]-prev_XP1[:, 0:3])
+                v2 = torch.norm(XP2[:, 0:3]-prev_XP2[:, 0:3])
+                print("v1", v1)
+                print("v2", v2)
+
+                # 限制为原速度
+                XP1[:, 0:3] = (XP1[:, 0:3]-prev_XP1[:, 0:3]) * prev_v1/v1 + prev_XP1[:, 0:3]
+                XP2[:, 0:3] = (XP2[:, 0:3]-prev_XP2[:, 0:3]) * prev_v2/v2 + prev_XP2[:, 0:3]
+
                 # 回退到上一步
-                # point[i].pop()
-                # point[j].pop()
-                del point[i][-1]
-                del point[j][-1]
-                print("poped!")
+                point[i].pop()
+                point[j].pop()
 
                 # 将调整后的路径点添加到列表中
                 point[i].append(XP1[:, 0:3])
