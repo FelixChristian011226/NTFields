@@ -42,7 +42,7 @@ print(np.shape(grid))
 grid = torch.from_numpy(grid).to('cuda:0').float()
 grid = grid.unsqueeze(0)
 
-# 获取环境特征
+# 获取环境特征 （1, 1, 128, 128, 128）
 f_0, f_1 = womodel.network.env_encoder(grid)
 
 for i in range(5):
