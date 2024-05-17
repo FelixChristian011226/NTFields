@@ -205,5 +205,11 @@ mesh = o3d.io.read_triangle_mesh("datasets/gibson/0/mesh_z_up_scaled.off")
 mesh.scale(20, center=(0,0,0))
 mesh.compute_vertex_normals()
 
+# 保存点云和网格对象到文件中
+# for i in range(robot_num):
+#     o3d.io.write_point_cloud("./Visualization/point_clouds"+str(i)+".ply", point_clouds[i])  # 保存点云对象为PLY格式
+# o3d.io.write_triangle_mesh("./Visualization/mesh.obj", mesh)  # 保存网格对象为OBJ格式
+
+
 # 将所有点云对象和网格对象传递给 draw_geometries 函数进行可视化
 o3d.visualization.draw_geometries([mesh] + point_clouds)
