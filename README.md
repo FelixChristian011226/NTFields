@@ -1,3 +1,15 @@
+# NTFields-Based-Multi-Robot-Path-Planning
+This repository is forked from [NTFields](https://github.com/ruiqini/NTFields).
+I made some additions on the test part to implement multi-robot path planning with collision avoidance.
+To try this multi-robot path planning in a Gibson environment, run:
+
+```eval
+python test/gib_plan_rvo.py 
+```
+<img src="fig/multi-robot.png">
+
+Information about the original work is below.
+
 # NTFields
 
 >**NTFields: Neural Time Fields for Physics-Informed Robot Motion Planning**
