@@ -104,7 +104,7 @@ start = timer()
 
 iter = 0
 while any(not_done):
-    print("iter",iter)
+    # print("iter",iter)
     prev_XP = XP.clone()
     # 遍历每个机器人，获得速度
     for i in range(robot_num):
@@ -153,7 +153,7 @@ while any(not_done):
                 safe_dis = radius[i] + radius[j] + safe_cst
                 if rbt_dis < safe_dis:
                     collision_detected = True
-                    print("collision between robot", i, "and robot", j)
+                    # print("collision between robot", i, "and robot", j)
                     collision += 1
 
                     # 计算调整量
@@ -186,6 +186,8 @@ while any(not_done):
         break
 
 end = timer()
+
+print("time:",end - start)
 
 for i in range(robot_num):
     # 将路径点列表转换为 NumPy 数组，并按比例放大
