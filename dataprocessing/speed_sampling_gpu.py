@@ -211,24 +211,29 @@ def point_rand_sample_bound_points(numsamples, dim,
                              vertices, faces,velocity_max, offset, margin):
     numsamples = int(numsamples)
 
+    # 把输入的顶点和面数据转换为PyTorch张量，并将它们传输到GPU上，为后续操作做准备。
     vertices = torch.tensor(vertices, dtype=torch.float32, device='cuda')
     faces = torch.tensor(faces, dtype=torch.long, device='cuda')
+    # 根据给定的顶点和面数据构造三角形，并增加一个维度以用于后续批处理。
     triangles = vertices[faces].unsqueeze(dim=0)
     print(vertices.shape)
     print(faces.shape)
     print(triangles.shape)
     #X  = torch.zeros((numsamples,2*dim)).cuda()
     #Y  = torch.zeros((numsamples,2)).cuda()
+    # 初始化一个空的列表用于存储采样的点对(X_list)和它们的速度(Y_list)
     X_list = []
     Y_list = []
     OutsideSize = numsamples + 2
     WholeSize = 0
     while OutsideSize > 0:
+        # 生成随机点P和nP，后者是前者根据随机位移dP（归一化后，单位长度）和长度rL得到的，rL基于点距离原点的最远距离(根号3)随机选择。
         P  = torch.rand((2*numsamples,dim),dtype=torch.float32, device='cuda')-0.5
         dP = torch.rand((2*numsamples,dim),dtype=torch.float32, device='cuda')-0.5
         rL = (torch.rand((2*numsamples,1),dtype=torch.float32, device='cuda'))*np.sqrt(3.)
         nP = P + torch.nn.functional.normalize(dP,dim=1)*rL
 
+        # 取nP在边界内的点
         PointsInside = torch.all((nP <= 0.5),dim=1) & torch.all((nP >= -0.5),dim=1)
         
 
@@ -239,16 +244,19 @@ def point_rand_sample_bound_points(numsamples, dim,
         if(x0.shape[0]<=1):
             continue
         #print(len(PointsOutside))
+        # 构建x0的查询点，用于调用BVH算法计算这些点到最近表面的距离。这里的torch.cuda.synchronize()确保所有之前的CUDA操作都已经完成。
         query_points = x0
         query_points = query_points.unsqueeze(dim=0)
         #print(query_points.shape)
         bvh = bvh_distance_queries.BVH()
         torch.cuda.synchronize()
         torch.cuda.synchronize()
+        # 执行BVH算法得到x0点到最近表面的距离，去掉无关的维度，并开方得到实际距离。
         distances, closest_points, closest_faces, closest_bcs= bvh(triangles, query_points)
         torch.cuda.synchronize()
         unsigned_distance = torch.sqrt(distances).squeeze()
         
+        # 从x0中去掉那些距离超出边界的点
         where_d          = (unsigned_distance <=  margin) & \
                                 (unsigned_distance >=  offset)
         x0 = x0[where_d]
@@ -258,6 +266,7 @@ def point_rand_sample_bound_points(numsamples, dim,
         if(x1.shape[0]<=1):
             continue
 
+        # 对于残余的移动后的点x1，重复与上面相同的过程，计算其到最近表面的距离。
         query_points = x1
         query_points = query_points.unsqueeze(dim=0)
         bvh = bvh_distance_queries.BVH()
@@ -268,6 +277,7 @@ def point_rand_sample_bound_points(numsamples, dim,
         #unsigned_distance = abs()
         y1 = torch.sqrt(distances).squeeze()
 
+        # 合并满足条件的所有点对，更新控制变量，准备退出循环或进行下一次迭代。
         x = torch.cat((x0,x1),1)
         y = torch.cat((y0.unsqueeze(1),y1.unsqueeze(1)),1)
 

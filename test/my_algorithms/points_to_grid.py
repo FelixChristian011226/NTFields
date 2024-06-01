@@ -20,7 +20,7 @@ point_cloud = o3d.geometry.PointCloud()
 point_cloud.points = o3d.utility.Vector3dVector(points)
 
 # 将点云转换为体素网格
-voxel_size = 2.0  # 每个体素的大小
+voxel_size = 1.0  # 每个体素的大小
 voxel_grid = o3d.geometry.VoxelGrid.create_from_point_cloud_within_bounds(
     point_cloud, voxel_size, min_bound=(0, 0, 0), max_bound=(128, 128, 128)
 )
